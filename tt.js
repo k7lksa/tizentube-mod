@@ -1,11 +1,12 @@
 // tizentube-mod loader, published as tt.js (the URL inside the APK).
 // The TV keeps tt.js in its cache for days, and jsDelivr can serve an old copy of a branch for hours,
 // so this file rarely changes: it asks GitHub for the latest commit and runs main.js of that exact commit.
-// main.js is downloaded as text and run directly: the TV app ignores <script src> added by the page.
+// main.js is downloaded as text and run directly. The page requires Trusted Types: scripts can only be
+// run or attached through a policy, so one is created first.
 // A small status line at the bottom of the screen shows what happened (for 20 seconds).
 (function () {
     var REPO = 'k7lksa/tizentube-mod';
-    var LOADER_VERSION = 'L3';
+    var LOADER_VERSION = 'L4';
     var started = false;
     var status = null;
     var steps = [];
@@ -31,26 +32,73 @@
         render();
     }
 
-    function run(code) {
-        window.ttModRan = false;
+    // Trusted Types: the names a policy may have can be limited by the page, try a few
+    var POLICY_NAMES = ['tizentube-mod', 'tizentube', 'default', 'goog#html', 'youtube-tv', 'ytlr'];
+    var policy = null;
+    var policyName = 'none';
+
+    function getPolicy() {
+        if (policy || !window.trustedTypes || !window.trustedTypes.createPolicy) return policy;
+        for (var i = 0; i < POLICY_NAMES.length && !policy; i++) {
+            try {
+                policy = window.trustedTypes.createPolicy(POLICY_NAMES[i], {
+                    createScript: function (s) { return s; },
+                    createScriptURL: function (s) { return s; },
+                    createHTML: function (s) { return s; }
+                });
+                policyName = POLICY_NAMES[i];
+            } catch (_) {}
+        }
+        return policy;
+    }
+
+    function trusted(kind, value) {
+        var p = getPolicy();
+        return p ? p[kind](value) : value;
+    }
+
+    function errorText(e) {
+        return (e && e.message ? e.message : String(e)).slice(0, 70);
+    }
+
+    function run(code, url) {
+        // Set as the first statement: once it's set, the script ran (even if it failed later)
+        window.ttModStarted = false;
+        var marked = 'window.ttModStarted = true;\n' + code;
+        getPolicy();
+        show('policy ' + policyName);
         // 1. Indirect eval: runs in the global scope, like a script file
         try {
-            (0, eval)(code + '\n;window.ttModRan = true;\n//# sourceURL=tizentube-mod-main.js');
+            (0, eval)(trusted('createScript', marked + '\n//# sourceURL=tizentube-mod-main.js'));
+            if (window.ttModStarted) return 'eval';
         } catch (e) {
-            show('eval: ' + (e && e.message ? e.message : e).toString().slice(0, 80));
-            // The script ran and failed: don't run it twice. Only retry if eval itself was refused.
-            if (!(e instanceof EvalError)) return 'eval, failed';
+            show('eval: ' + errorText(e));
+            // The script ran and failed: don't run it twice
+            if (window.ttModStarted) return 'eval, failed';
         }
-        if (window.ttModRan) return 'eval';
-        // 2. Inline script (if eval is not allowed)
+        // 2. Inline script
         try {
-            var script = document.createElement('script');
-            script.textContent = code + '\n;window.ttModRan = true;';
-            (document.head || document.documentElement).appendChild(script);
+            var inline = document.createElement('script');
+            inline.text = trusted('createScript', marked);
+            (document.head || document.documentElement).appendChild(inline);
+            if (window.ttModStarted) return 'inline';
         } catch (e) {
-            show('inline: ' + (e && e.message ? e.message : e).toString().slice(0, 80));
+            show('inline: ' + errorText(e));
         }
-        return window.ttModRan ? 'inline' : null;
+        // 3. Script file (asynchronous)
+        try {
+            var file = document.createElement('script');
+            file.src = trusted('createScriptURL', url);
+            file.onload = function () {
+                show('src loaded, build ' + (window.ttModBuild || '?'));
+            };
+            file.onerror = function () { show('src failed'); };
+            (document.head || document.documentElement).appendChild(file);
+            return 'src pending';
+        } catch (e) {
+            show('src: ' + errorText(e));
+        }
+        return null;
     }
 
     function load(ref, bust) {
@@ -68,7 +116,7 @@
                 return;
             }
             show('main.js ' + Math.round(code.length / 1024) + 'KB');
-            var how = run(code);
+            var how = run(code, url);
             show(how ? 'ran (' + how + ') build ' + (window.ttModBuild || '?') : 'not run');
         };
         xhr.onerror = function () { show('main.js network error'); };
