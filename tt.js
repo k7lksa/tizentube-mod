@@ -6,10 +6,13 @@
 // downloads it, stores it and, if the app was opened moments ago and no key was pressed, reloads the page once so the new
 // build runs now (otherwise it runs at the next start). Without a stored copy it works like L4 (GitHub, then main.js of that
 // exact commit) and stores the result.
+// L6: the app also injects this loader into its own splash page shown before YouTube's (another URL, a strict CSP); L5 ran
+// the stored main.js there too (seen 17-10 08:36: "eval refused > ran (inline) build ?"). Only YouTube's TV page runs it now.
 // main.js runs through a Trusted Types policy (the page requires it). A status line at the bottom shows what happened (20 s).
 (function () {
+    if (location.hostname !== 'www.youtube.com' || !/^\/tv\/?$/.test(location.pathname)) return;   // not the TV app's page
     var REPO = 'k7lksa/tizentube-mod';
-    var LOADER_VERSION = 'L5';
+    var LOADER_VERSION = 'L6';
     var KEY_CODE = 'tt-mod-main-code', KEY_SHA = 'tt-mod-main-sha';
     var RELOAD_WINDOW_MS = 15000;          // a newer build found later than this runs at the next start
     var startedAt = Date.now();
